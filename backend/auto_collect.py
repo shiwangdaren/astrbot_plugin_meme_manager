@@ -30,6 +30,7 @@ from .semantic_caption import (
     prepare_visual_inputs,
 )
 from .semantic_models import REVIEW_CATEGORY
+from .frame_policy import image_frame_count, run_frame_fallback
 from .semantic_storage import invalidate_semantic_metadata
 
 AUTO_COLLECT_INBOX_DIR = PLUGIN_DATA_DIR / "auto_collect_inbox"
@@ -475,10 +476,20 @@ class AutoCollectManager:
         self._save_json(AUTO_COLLECT_STATE_PATH, self._state)
 
     async def _classify(
+        self, content: bytes, extension: str, categories: dict[str, str],
+    ) -> dict[str, Any]:
+        async def attempt(limit):
+            return await self._classify_once(content, extension, categories, max_frames=limit)
+        result, used = await run_frame_fallback(image_frame_count(io.BytesIO(content)), attempt)
+        result["sampled_frames"] = used
+        return result
+
+    async def _classify_once(
         self,
         content: bytes,
         extension: str,
         categories: dict[str, str],
+        max_frames: int = 128,
     ) -> dict[str, Any]:
         """调用已配置的视觉模型，并规范化其 JSON 结果。
 
@@ -500,7 +511,7 @@ class AutoCollectManager:
         try:
             source_file.write(content)
             source_file.close()
-            visual_paths, frame_paths = prepare_visual_inputs(source_file.name)
+            visual_paths, frame_paths = prepare_visual_inputs(source_file.name, max_frames=max_frames)
             prompt = (
                 "可选分类及用途如下：\n"
                 + json.dumps(categories, ensure_ascii=False, indent=2)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from .frame_policy import image_frame_count, run_frame_fallback
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -124,7 +125,7 @@ CAPTION_RETRY_PROMPT = """
 身份不确定就省略，只根据画面、动作和文字还原聊天用法。
 只返回：{"caption":"一到两句中文核心梗义和使用场景","tags":["6到10个细粒度中文标签"],"visible_text":"图中原文或空字符串","category_fit":"match、uncertain、conflict 三选一","category_review_reason":"match 时留空，其他情况简述原因","suggested_category":"仅 conflict 时填写现有分类键，否则留空"}"""
 
-MAX_GIF_FRAMES = 5
+MAX_GIF_FRAMES = 128
 CAPTION_TOOL_NAME = "submit_meme_caption"
 CAPTION_OUTPUT_MODE_CACHE_ATTR = "_meme_manager_caption_output_modes"
 
@@ -277,7 +278,7 @@ def build_caption_prompt(
     return prompt
 
 
-def prepare_visual_inputs(path: Path | str) -> tuple[list[str], list[str]]:
+def prepare_visual_inputs(path: Path | str, max_frames: int = MAX_GIF_FRAMES) -> tuple[list[str], list[str]]:
     """为静态图片和动图准备视觉模型输入。
 
     Args:
@@ -300,7 +301,7 @@ def prepare_visual_inputs(path: Path | str) -> tuple[list[str], list[str]]:
             if frame_count <= 1:
                 return [str(source)], []
             confirmed_animated = True
-            sample_count = min(frame_count, MAX_GIF_FRAMES)
+            sample_count = min(frame_count, max(1, min(MAX_GIF_FRAMES, max_frames)))
             if sample_count <= 1:
                 frame_indexes = [0]
             else:
@@ -311,6 +312,7 @@ def prepare_visual_inputs(path: Path | str) -> tuple[list[str], list[str]]:
             for frame_index in frame_indexes:
                 image.seek(frame_index)
                 frame = image.convert("RGBA")
+                frame.thumbnail((1600, 1600))
                 output = tempfile.NamedTemporaryFile(
                     prefix=f"meme_frame_{frame_index}_",
                     suffix=".png",
@@ -590,7 +592,15 @@ async def _request_caption_json_response(
         return await context.llm_generate(**request)
 
 
-async def generate_caption(
+async def generate_caption(context, image_path, provider_id="", **kwargs):
+    async def attempt(limit):
+        return await _generate_caption_once(context, image_path, provider_id, _max_frames=limit, **kwargs)
+    result, used = await run_frame_fallback(image_frame_count(image_path), attempt)
+    result["sampled_frames"] = used
+    return result
+
+
+async def _generate_caption_once(
     context: Any,
     image_path: Path | str,
     provider_id: str = "",
@@ -600,11 +610,12 @@ async def generate_caption(
     available_categories: dict[str, str] | None = None,
     review_instruction: str = "",
     current_semantic: dict[str, Any] | None = None,
+    _max_frames: int = MAX_GIF_FRAMES,
 ) -> dict[str, Any]:
     """调用 AstrBot 的视觉聊天模型；失败由任务层记录为单张 failed。"""
     if context is None or not callable(getattr(context, "llm_generate", None)):
         raise RuntimeError("当前没有可用的视觉模型上下文")
-    visual_paths, temp_paths = prepare_visual_inputs(image_path)
+    visual_paths, temp_paths = prepare_visual_inputs(image_path, max_frames=_max_frames)
     try:
         selected_provider = provider_id
         if not selected_provider:

@@ -1,5 +1,15 @@
 # 🌟 AstrBot 表情包管理器
 
+候选发行版本：`4.15.5`；要求项目核心 `4.27.4+qqbot.2` 和 Runtime V2。生产实际 import、启用及工具暴露以部署验收为准，不能仅凭版本号判断可用。
+
+## Runtime V2
+
+本fork来源：[anka-afk上游](https://github.com/anka-afk/astrbot_plugin_meme_manager)，由[项目fork](https://github.com/shiwangdaren/astrbot_plugin_meme_manager)保存本地兼容补丁；作者仍为anka，原许可与致谢保留。
+
+项目兼容补丁保持原作者、包、语义索引、云同步和管理功能。QQ群表情发送沿用原 event 进入核心 Outbox，保留当前请求的身份和回执；未知交付保留素材，确认成功才清理临时文件。自动收集跳过内部 worker/completion/scheduled 的产物，避免把生成结果当作新的真人上传。
+
+本插件需要项目配套的 AstrBot Runtime V2；以下既有数据、用法和历史记录继续保留。
+
 ![Banner](.github/img/Banner.png)
 
 <div align="center">
@@ -447,7 +457,7 @@ async def send_in_two_steps(context, event, chain: MessageChain):
 
 ## 📜 更新日志
 
-当前版本：v4.15.4
+本项目候选版本：v4.15.5；基于上游v4.15.4的兼容补丁，不代表上游官方发行。
 
 - 🧠 修复 Gemini 视觉模型执行语义化及人工复审时，工具 schema 因空字符串枚举被拒绝的问题。
 - 🛡️ 分类建议仍在模型响应后经过现有分类白名单校验，未知分类不会被采用。

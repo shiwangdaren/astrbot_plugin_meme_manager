@@ -580,15 +580,21 @@ class EventHandlerMixin:
         emotion_images: list[Image] = prepared.get("images") or []
         temp_files: list[str] = prepared.get("temp_files") or []
 
+        completed = False
         try:
             if send_text and cleaned_chain.chain:
                 await event.send(cleaned_chain)
 
             if send_images and emotion_images:
-                for image in emotion_images:
+                for index, image in enumerate(emotion_images):
+                    if index < int(prepared.get("next_image", 0)):
+                        continue
                     await self._send_meme_image(event, image)
+                    prepared["next_image"] = index + 1
+            completed = True
         finally:
-            for temp_file in temp_files:
+            images_acknowledged = not emotion_images or (send_images and int(prepared.get("next_image", 0)) >= len(emotion_images))
+            for temp_file in temp_files if completed and images_acknowledged else []:
                 try:
                     if os.path.exists(temp_file):
                         os.remove(temp_file)
@@ -1434,20 +1440,27 @@ class EventHandlerMixin:
     async def _after_message_sent_impl(self, event: AstrMessageEvent):
         """消息发送后处理。用于发送未混合的表情图片。"""
         pending_images = event.get_extra("meme_manager_pending_images")
+        if event.get_extra("meme_manager_delivery_unknown", False):
+            return
 
+        completed = False
         try:
             if pending_images:
-                for image in pending_images:
+                for image in list(pending_images):
                     await self._send_meme_image(event, image)
+                    pending_images.remove(image)
+            completed = True
         except Exception as e:
+            event.set_extra("meme_manager_delivery_unknown", True)
             logger.error(f"发送表情图片失败: {str(e)}")
             logger.error(traceback.format_exc())
         finally:
-            event.set_extra("meme_manager_pending_images", None)
+            if completed:
+                event.set_extra("meme_manager_pending_images", None)
 
             # 清理临时文件
             temp_files = event.get_extra("meme_manager_temp_files")
-            if temp_files:
+            if temp_files and completed:
                 for temp_file in temp_files:
                     try:
                         if os.path.exists(temp_file):
@@ -1691,8 +1704,11 @@ class EventHandlerMixin:
 
     async def _send_meme_image(self, event: AstrMessageEvent, image: Image) -> None:
         image = await self._ensure_image_send_format(image)
-        if event.get_platform_name() in {"gewechat", "webchat"}:
+        if event.get_platform_name() in {"gewechat", "webchat", "aiocqhttp"}:
             await event.send(MessageChain([image]))
+            receipt = getattr(event, "_runtime_v2_last_delivery_receipt", None)
+            if isinstance(receipt, dict) and receipt.get("status") != "acknowledged":
+                raise RuntimeError("Meme delivery has not been acknowledged")
             return
         await self.context.send_message(event.unified_msg_origin, MessageChain([image]))
 

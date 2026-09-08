@@ -2,6 +2,7 @@ import asyncio
 import re
 from pathlib import Path
 
+from astrbot.core.runtime_v2.tasks.origin import OriginKind, event_origin_kind
 from astrbot.api import llm_tool, logger
 from astrbot.api.all import *
 from astrbot.api.event import AstrMessageEvent, filter
@@ -325,7 +326,8 @@ class MemeSender(Star, WebAPIMixin, CommandMixin, EventHandlerMixin):
         async for result in self._handle_upload_image_impl(event):
             yield result
         if not manual_upload_pending:
-            await self.auto_collect_manager.submit(event)
+            if event_origin_kind(event) not in {OriginKind.WORKER, OriginKind.COMPLETION, OriginKind.SCHEDULED}:
+                await self.auto_collect_manager.submit(event)
 
     @filter.on_waiting_llm_request(priority=99999)
     async def mark_llm_request_origin(self, event: AstrMessageEvent):
